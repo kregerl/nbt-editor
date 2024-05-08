@@ -1,2 +1,5 @@
+.vscode
 /target
 *.dat
+*.txt
+*.mca

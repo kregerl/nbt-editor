@@ -3,15 +3,15 @@
 
 use std::{
     fs::File,
-    io::{self, Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom},
 };
 
-use eframe::egui::{self, CollapsingHeader, Ui};
+use eframe::egui::{self, Ui};
 use log::info;
 use nbt::tag::{NBTMap, NBTValue};
 
 fn main() -> Result<(), eframe::Error> {
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([320.0, 240.0]),
@@ -19,15 +19,14 @@ fn main() -> Result<(), eframe::Error> {
     };
 
     eframe::run_native(
-        "My egui App",
+        "NBT Editor",
         options,
-        Box::new(|cc| Box::new(NBTEditor::new("playerdata.dat").unwrap())),
+        Box::new(|_cc| Box::new(NBTEditor::new("playerdata.dat").unwrap())),
     )
 }
 
 struct NBTEditor {
     data: NBTMap,
-    id: u32,
 }
 
 const GZIP_SIGNATURE: [u8; 2] = [0x1f, 0x8b];
@@ -36,7 +35,6 @@ impl NBTEditor {
     pub fn new(file_path: &str) -> nbt::Result<Self> {
         Ok(Self {
             data: Self::read_nbt_file(file_path)?,
-            id: 0
         })
     }
 
@@ -56,17 +54,18 @@ impl NBTEditor {
         Ok(nbt_map)
     }
 
-    fn create_nbt_entry(name: &str, tag: &NBTValue, ui: &mut Ui) {
-        let label = if !name.is_empty(){
+    fn create_nbt_entry(name: &str, tag: &NBTValue, ui: &mut Ui, counter: usize) {
+        let label = if !name.is_empty() {
             format!("{}: ", name)
         } else {
             "".into()
         };
 
-
         match tag {
             NBTValue::Byte(n) => {
-                ui.label(format!("{}{}", label, n));
+                ui.push_id(counter, |ui| {
+                    ui.label(format!("{}{}", label, n));
+                });
             }
             NBTValue::Short(n) => {
                 ui.label(format!("{}{}", label, n));
@@ -83,22 +82,12 @@ impl NBTEditor {
             NBTValue::Double(n) => {
                 ui.label(format!("{}{}", label, n));
             }
-            NBTValue::ByteArray(byte_array) => {
-                Self::create_collapsing_header(name, ui, |ui| {
-                    for byte in byte_array {
-                        ui.label(byte.to_string());
-                    }
-                });
-            }
             NBTValue::String(n) => {
                 ui.label(n);
             }
             NBTValue::List(list) => {
-                Self::create_collapsing_header(name, ui, |ui| {
-                    for element in list {
-                        Self::create_nbt_entry("", element, ui);
-                    }
-                });
+                let len = list.len();
+                Self::push_collapsing(&label, std::iter::zip(vec![""; len], list), counter, ui);
             }
             NBTValue::Compound(map) => {
                 let label = if label.is_empty() {
@@ -106,63 +95,82 @@ impl NBTEditor {
                 } else {
                     label
                 };
-
-                Self::create_collapsing_header(&label, ui, |ui| {
-                    for (key, value) in map {
-                        Self::create_nbt_entry(key, value, ui);
-                    }
-                });
+                Self::push_collapsing(
+                    &label,
+                    map.iter().map(|(name, tag)| (name.as_str(), tag)),
+                    counter,
+                    ui,
+                );
+            }
+            NBTValue::ByteArray(byte_array) => {
+                Self::push_array(byte_array, ui, counter);
             }
             NBTValue::IntArray(int_array) => {
-                Self::create_collapsing_header(name, ui, |ui| {
-                    for int in int_array {
-                        ui.label(int.to_string());
-                    }
-                });
+                Self::push_array(int_array, ui, counter);
             }
             NBTValue::LongArray(long_array) => {
-                Self::create_collapsing_header(name, ui, |ui| {
-                    for long in long_array {
-                        ui.label(long.to_string());
-                    }
-                });
+                Self::push_array(long_array, ui, counter);
             }
         }
     }
 
-    fn create_collapsing_header<BodyRet>(
-        name: &str,
-        ui: &mut Ui,
-        body_function: impl FnOnce(&mut Ui) -> BodyRet,
-    ) {
-        // let id = ui.make_persistent_id(rand::random::<u16>());
-        // let id = egui::Id::from_u64(rand::thread_rng().gen());
-        CollapsingHeader::new(name).show(ui, body_function);
+    fn push_array<I: ToString>(array: &[I], ui: &mut Ui, mut counter: usize) {
+        counter += 1;
+        ui.push_id(counter, |ui| {
+            for long in array {
+                counter += 1;
+                ui.push_id(counter, |ui| {
+                    ui.label(long.to_string());
+                });
+            }
+        });
+    }
 
-        // egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
-            // .show_header(ui, |ui| {
-                // ui.label(name); // you can put checkboxes or whatever here
-            // })
-            // .body(body_function);
+    fn push_collapsing<'a, I>(label: &str, elements: I, mut counter: usize, ui: &mut Ui)
+    where
+        I: Iterator<Item = (&'a str, &'a NBTValue)>,
+    {
+        counter += 1;
+        ui.push_id(counter, |ui| {
+            ui.collapsing(label, |ui| {
+                for (key, value) in elements {
+                    counter += 1;
+                    ui.push_id(counter, |ui| {
+                        Self::create_nbt_entry(&key, value, ui, counter);
+                    });
+                }
+            });
+        });
     }
 }
 
 impl eframe::App for NBTEditor {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("My egui Application");
-            for (key, value) in &self.data.content {
-                match value {
-                    nbt::tag::NBTValue::ByteArray(_) => Self::create_nbt_entry(key, value, ui),
-                    nbt::tag::NBTValue::List(_) => Self::create_nbt_entry(key, value, ui),
-                    nbt::tag::NBTValue::Compound(_) => Self::create_nbt_entry(key, value, ui),
-                    nbt::tag::NBTValue::IntArray(_) => Self::create_nbt_entry(key, value, ui),
-                    nbt::tag::NBTValue::LongArray(_) => Self::create_nbt_entry(key, value, ui),
-                    _ => {
-                        Self::create_nbt_entry(key, value, ui)
-                    }
-                };
-            }
+            ui.heading("NBT Editor");
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let counter = 0;
+                for (key, value) in &self.data.content {
+                    match value {
+                        nbt::tag::NBTValue::ByteArray(_) => {
+                            Self::create_nbt_entry(key, value, ui, counter)
+                        }
+                        nbt::tag::NBTValue::List(_) => {
+                            Self::create_nbt_entry(key, value, ui, counter)
+                        }
+                        nbt::tag::NBTValue::Compound(_) => {
+                            Self::create_nbt_entry(key, value, ui, counter)
+                        }
+                        nbt::tag::NBTValue::IntArray(_) => {
+                            Self::create_nbt_entry(key, value, ui, counter)
+                        }
+                        nbt::tag::NBTValue::LongArray(_) => {
+                            Self::create_nbt_entry(key, value, ui, counter)
+                        }
+                        _ => Self::create_nbt_entry(key, value, ui, counter),
+                    };
+                }
+            });
         });
     }
 }
