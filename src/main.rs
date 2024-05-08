@@ -2,11 +2,13 @@
 #![allow(rustdoc::missing_crate_level_docs)] // it's an example
 
 use std::{
+    collections::BTreeMap,
     fs::File,
     io::{Read, Seek, SeekFrom},
 };
 
 use eframe::egui::{self, Ui};
+use egui_dock::{DockArea, DockState, TabViewer};
 use log::info;
 use nbt::tag::{NBTMap, NBTValue};
 
@@ -25,8 +27,57 @@ fn main() -> Result<(), eframe::Error> {
     )
 }
 
+struct Tabs {
+    buffers: BTreeMap<String, NBTMap>,
+}
+
+impl Tabs {
+    pub fn new(title: &str, contents: NBTMap) -> Self {
+        let mut map = BTreeMap::new();
+        map.insert(title.to_owned(), contents);
+        Self { buffers: map }
+    }
+}
+
+impl TabViewer for Tabs {
+    type Tab = String;
+
+    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
+        egui::WidgetText::from(&*tab)
+    }
+
+    fn ui(&mut self, ui: &mut Ui, tab: &mut Self::Tab) {
+        ui.heading("NBT Editor");
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            let counter = 0;
+            let x = self.buffers.get(tab).unwrap();
+            for (key, value) in &x.content {
+                match value {
+                    nbt::tag::NBTValue::ByteArray(_) => {
+                        NBTEditor::create_nbt_entry(key, value, ui, counter)
+                    }
+                    nbt::tag::NBTValue::List(_) => {
+                        NBTEditor::create_nbt_entry(key, value, ui, counter)
+                    }
+                    nbt::tag::NBTValue::Compound(_) => {
+                        NBTEditor::create_nbt_entry(key, value, ui, counter)
+                    }
+                    nbt::tag::NBTValue::IntArray(_) => {
+                        NBTEditor::create_nbt_entry(key, value, ui, counter)
+                    }
+                    nbt::tag::NBTValue::LongArray(_) => {
+                        NBTEditor::create_nbt_entry(key, value, ui, counter)
+                    }
+                    _ => NBTEditor::create_nbt_entry(key, value, ui, counter),
+                };
+            }
+        });
+    }
+}
+
 struct NBTEditor {
-    data: NBTMap,
+    tabs: Tabs,
+    state: DockState<String>,
 }
 
 const GZIP_SIGNATURE: [u8; 2] = [0x1f, 0x8b];
@@ -34,7 +85,8 @@ const ZLIB_SIGNATURES: [[u8; 2]; 4] = [[0x78, 0x01], [0x78, 0x5e], [0x78, 0x9c],
 impl NBTEditor {
     pub fn new(file_path: &str) -> nbt::Result<Self> {
         Ok(Self {
-            data: Self::read_nbt_file(file_path)?,
+            tabs: Tabs::new("Testing", Self::read_nbt_file(file_path)?),
+            state: DockState::new(vec!["Testing".to_owned()]),
         })
     }
 
@@ -147,30 +199,19 @@ impl NBTEditor {
 impl eframe::App for NBTEditor {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("NBT Editor");
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let counter = 0;
-                for (key, value) in &self.data.content {
-                    match value {
-                        nbt::tag::NBTValue::ByteArray(_) => {
-                            Self::create_nbt_entry(key, value, ui, counter)
-                        }
-                        nbt::tag::NBTValue::List(_) => {
-                            Self::create_nbt_entry(key, value, ui, counter)
-                        }
-                        nbt::tag::NBTValue::Compound(_) => {
-                            Self::create_nbt_entry(key, value, ui, counter)
-                        }
-                        nbt::tag::NBTValue::IntArray(_) => {
-                            Self::create_nbt_entry(key, value, ui, counter)
-                        }
-                        nbt::tag::NBTValue::LongArray(_) => {
-                            Self::create_nbt_entry(key, value, ui, counter)
-                        }
-                        _ => Self::create_nbt_entry(key, value, ui, counter),
-                    };
+            for title in self.tabs.buffers.keys() {
+                let tab_location = self.state.find_tab(title);
+                if ui.selectable_label(tab_location.is_some(), title).clicked() {
+                    if let Some(tab_location) = tab_location {
+                        self.state.set_active_tab(tab_location);
+                    } else {
+                        self.state.push_to_focused_leaf(title.clone());
+                    }
                 }
-            });
+            }
         });
+        DockArea::new(&mut self.state)
+            .draggable_tabs(false)
+            .show(ctx, &mut self.tabs);
     }
 }
