@@ -7,9 +7,9 @@ use std::{
     io::{Read, Seek, SeekFrom},
 };
 
-use eframe::egui::{self, Ui};
+use eframe::egui::{self, collapsing_header::CollapsingState, Ui};
 use egui_dock::{DockArea, DockState, TabViewer};
-use log::info;
+use log::{debug};
 use nbt::tag::{NBTMap, NBTValue};
 
 fn main() -> Result<(), eframe::Error> {
@@ -50,27 +50,8 @@ impl TabViewer for Tabs {
         ui.heading("NBT Editor");
         egui::ScrollArea::vertical().show(ui, |ui| {
             let counter = 0;
-            let x = self.buffers.get(tab).unwrap();
-            for (key, value) in &x.content {
-                match value {
-                    nbt::tag::NBTValue::ByteArray(_) => {
-                        NBTEditor::create_nbt_entry(key, value, ui, counter)
-                    }
-                    nbt::tag::NBTValue::List(_) => {
-                        NBTEditor::create_nbt_entry(key, value, ui, counter)
-                    }
-                    nbt::tag::NBTValue::Compound(_) => {
-                        NBTEditor::create_nbt_entry(key, value, ui, counter)
-                    }
-                    nbt::tag::NBTValue::IntArray(_) => {
-                        NBTEditor::create_nbt_entry(key, value, ui, counter)
-                    }
-                    nbt::tag::NBTValue::LongArray(_) => {
-                        NBTEditor::create_nbt_entry(key, value, ui, counter)
-                    }
-                    _ => NBTEditor::create_nbt_entry(key, value, ui, counter),
-                };
-            }
+            let map = self.buffers.get(tab).unwrap();
+            NBTEditor::push_nbt_map(map, ui, counter);
         });
     }
 }
@@ -90,6 +71,8 @@ impl NBTEditor {
         })
     }
 
+    /// Reads an NBT file and decompresses it with the correct method 
+    /// (gzip, zlib) before returning it as a `NBTMap`
     fn read_nbt_file(file_path: &str) -> nbt::Result<NBTMap> {
         let mut file = File::open(file_path)?;
         let mut buffer = [0u8; 2];
@@ -102,11 +85,24 @@ impl NBTEditor {
         } else {
             NBTMap::from_reader(&mut file)?
         };
-        info!("NBTMap: {:#?}", nbt_map);
+        debug!("NBTMap: {:#?}", nbt_map);
         Ok(nbt_map)
     }
 
-    fn create_nbt_entry(name: &str, tag: &NBTValue, ui: &mut Ui, counter: usize) {
+    fn push_nbt_map(map: &NBTMap, ui: &mut Ui, counter: usize) {
+        for (key, value) in &map.content {
+            match value {
+                nbt::tag::NBTValue::ByteArray(_) => Self::push_nbt_value(key, value, ui, counter),
+                nbt::tag::NBTValue::List(_) => Self::push_nbt_value(key, value, ui, counter),
+                nbt::tag::NBTValue::Compound(_) => Self::push_nbt_value(key, value, ui, counter),
+                nbt::tag::NBTValue::IntArray(_) => Self::push_nbt_value(key, value, ui, counter),
+                nbt::tag::NBTValue::LongArray(_) => Self::push_nbt_value(key, value, ui, counter),
+                _ => Self::push_nbt_value(key, value, ui, counter),
+            };
+        }
+    }
+
+    fn push_nbt_value(name: &str, tag: &NBTValue, ui: &mut Ui, counter: usize) {
         let label = if !name.is_empty() {
             format!("{}: ", name)
         } else {
@@ -188,7 +184,7 @@ impl NBTEditor {
                 for (key, value) in elements {
                     counter += 1;
                     ui.push_id(counter, |ui| {
-                        Self::create_nbt_entry(&key, value, ui, counter);
+                        Self::push_nbt_value(&key, value, ui, counter);
                     });
                 }
             });
@@ -198,6 +194,25 @@ impl NBTEditor {
 
 impl eframe::App for NBTEditor {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Side panel hierarchy for open projects & nbt tags
+        egui::SidePanel::left("heirarchy").show(ctx, |ui| {
+            ui.heading("NBT Editor");
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let mut counter = 0;
+                counter += 1;
+                CollapsingState::load_with_default_open(ctx, ui.make_persistent_id(counter), true)
+                    .show_header(ui, |ui| ui.label("root"))
+                    .body(|ui| {
+                        ui.push_id(counter, |ui| {
+                            for (_, value) in &self.tabs.buffers {
+                                NBTEditor::push_nbt_map(&value, ui, counter);
+                            }
+                        });
+                    });
+            });
+        });
+
+        // Tabbed central panel for editing and viewing nbt files
         egui::CentralPanel::default().show(ctx, |ui| {
             for title in self.tabs.buffers.keys() {
                 let tab_location = self.state.find_tab(title);
