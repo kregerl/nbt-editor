@@ -5,11 +5,12 @@ use std::{
     collections::BTreeMap,
     fs::File,
     io::{Read, Seek, SeekFrom},
+    path::Path,
 };
 
 use eframe::egui::{self, collapsing_header::CollapsingState, Ui};
 use egui_dock::{DockArea, DockState, TabViewer};
-use log::{debug};
+use log::{debug, info};
 use nbt::tag::{NBTMap, NBTValue};
 
 fn main() -> Result<(), eframe::Error> {
@@ -23,7 +24,8 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "NBT Editor",
         options,
-        Box::new(|_cc| Box::new(NBTEditor::new("playerdata.dat").unwrap())),
+        Box::new(|_cc| Box::new(NBTEditor::default())),
+        // Box::new(|_cc| Box::new(NBTEditor::new("playerdata.dat").unwrap())),
     )
 }
 
@@ -56,9 +58,19 @@ impl TabViewer for Tabs {
     }
 }
 
+// TODO: Make the tabs an option so the program can be opened without an initial file
 struct NBTEditor {
     tabs: Tabs,
     state: DockState<String>,
+}
+
+impl Default for NBTEditor {
+    fn default() -> Self {
+        Self {
+            tabs: Tabs::new("Untitled", NBTMap::new()),
+            state: DockState::new(vec![]),
+        }
+    }
 }
 
 const GZIP_SIGNATURE: [u8; 2] = [0x1f, 0x8b];
@@ -66,14 +78,31 @@ const ZLIB_SIGNATURES: [[u8; 2]; 4] = [[0x78, 0x01], [0x78, 0x5e], [0x78, 0x9c],
 impl NBTEditor {
     pub fn new(file_path: &str) -> nbt::Result<Self> {
         Ok(Self {
-            tabs: Tabs::new("Testing", Self::read_nbt_file(file_path)?),
+            tabs: Tabs::new("Testing", Self::read_nbt_file(Path::new(file_path))?),
             state: DockState::new(vec!["Testing".to_owned()]),
         })
     }
 
-    /// Reads an NBT file and decompresses it with the correct method 
+    fn add_tab(&mut self, title: &str, contents: NBTMap) {
+        self.tabs.buffers.insert(title.to_owned(), contents);
+        let mut tabs = self
+            .state
+            .main_surface()
+            .tabs()
+            .map(|name| name.to_owned())
+            .collect::<Vec<String>>();
+        tabs.push(title.into());
+        self.state = DockState::new(tabs);
+        if let Some(tab_location) = self.state.find_tab(&title.to_owned()) {
+            self.state.set_active_tab(tab_location);
+        } else {
+            self.state.push_to_focused_leaf(title.to_owned());
+        }
+    }
+
+    /// Reads an NBT file and decompresses it with the correct method
     /// (gzip, zlib) before returning it as a `NBTMap`
-    fn read_nbt_file(file_path: &str) -> nbt::Result<NBTMap> {
+    fn read_nbt_file(file_path: &Path) -> nbt::Result<NBTMap> {
         let mut file = File::open(file_path)?;
         let mut buffer = [0u8; 2];
         let _ = file.read_exact(&mut buffer)?;
@@ -190,28 +219,32 @@ impl NBTEditor {
             });
         });
     }
-}
 
-impl eframe::App for NBTEditor {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update_side_panel(&mut self, ctx: &egui::Context) {
         // Side panel hierarchy for open projects & nbt tags
         egui::SidePanel::left("heirarchy").show(ctx, |ui| {
             ui.heading("NBT Editor");
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let mut counter = 0;
-                counter += 1;
-                CollapsingState::load_with_default_open(ctx, ui.make_persistent_id(counter), true)
-                    .show_header(ui, |ui| ui.label("root"))
+                for (key, value) in &self.tabs.buffers {
+                    counter += 1;
+                    CollapsingState::load_with_default_open(
+                        ctx,
+                        ui.make_persistent_id(counter),
+                        true,
+                    )
+                    .show_header(ui, |ui| ui.label(format!("root [{}]", key)))
                     .body(|ui| {
                         ui.push_id(counter, |ui| {
-                            for (_, value) in &self.tabs.buffers {
-                                NBTEditor::push_nbt_map(&value, ui, counter);
-                            }
+                            NBTEditor::push_nbt_map(&value, ui, counter);
                         });
                     });
+                }
             });
         });
+    }
 
+    fn update_central_panel(&mut self, ctx: &egui::Context) {
         // Tabbed central panel for editing and viewing nbt files
         egui::CentralPanel::default().show(ctx, |ui| {
             for title in self.tabs.buffers.keys() {
@@ -225,6 +258,40 @@ impl eframe::App for NBTEditor {
                 }
             }
         });
+    }
+
+    fn update_menu_bar(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+            egui::menu::bar(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("New").clicked() {
+                        info!("New");
+                    }
+                    
+                    if ui.button("Open").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_file() {
+                            let title = path.file_name().unwrap().to_str().unwrap();
+                            let nbt = Self::read_nbt_file(&path).unwrap();
+                            self.add_tab(title, nbt);
+                            // let x = Some(path.display().to_string());
+                            info!("Got file path: {:#?}", path);
+                            info!("Tabs: {:#?}", self.tabs.buffers);
+                            ui.close_menu();
+                        }
+                    }
+                });
+            });
+        });
+    }
+}
+
+impl eframe::App for NBTEditor {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.update_menu_bar(ctx);
+
+        self.update_side_panel(ctx);
+        self.update_central_panel(ctx);
+
         DockArea::new(&mut self.state)
             .draggable_tabs(false)
             .show(ctx, &mut self.tabs);
