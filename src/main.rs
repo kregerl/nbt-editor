@@ -8,7 +8,7 @@ use std::{
     path::Path,
 };
 
-use eframe::egui::{self, collapsing_header::CollapsingState, Ui};
+use eframe::egui::{self, collapsing_header::CollapsingState, SelectableLabel, Ui};
 use egui_dock::{DockArea, DockState, TabViewer};
 use log::{debug, info};
 use nbt::tag::{NBTMap, NBTValue};
@@ -29,6 +29,7 @@ fn main() -> Result<(), eframe::Error> {
     )
 }
 
+#[derive(Default)]
 struct Tabs {
     buffers: BTreeMap<String, NBTMap>,
 }
@@ -67,7 +68,7 @@ struct NBTEditor {
 impl Default for NBTEditor {
     fn default() -> Self {
         Self {
-            tabs: Tabs::new("Untitled", NBTMap::new()),
+            tabs: Tabs::default(),
             state: DockState::new(vec![]),
         }
     }
@@ -140,24 +141,28 @@ impl NBTEditor {
 
         match tag {
             NBTValue::Byte(n) => {
-                ui.push_id(counter, |ui| {
-                    ui.label(format!("{}{}", label, n));
-                });
+                ui.label(format!("[B] {}{}", label, n));
             }
             NBTValue::Short(n) => {
-                ui.label(format!("{}{}", label, n));
+                ui.label(format!("[S] {}{}", label, n));
             }
             NBTValue::Int(n) => {
-                ui.label(format!("{}{}", label, n));
+                ui.label(format!("[I] {}{}", label, n));
             }
             NBTValue::Long(n) => {
-                ui.label(format!("{}{}", label, n));
+                ui.label(format!("[L] {}{}", label, n));
             }
             NBTValue::Float(n) => {
-                ui.label(format!("{}{}", label, n));
+                if ui
+                    .selectable_label(false, format!("[F] {}{}", label, n))
+                    .double_clicked()
+                {
+                    debug!("Double clicked");
+                }
+                // ui.label(format!("[F] {}{}", label, n));
             }
             NBTValue::Double(n) => {
-                ui.label(format!("{}{}", label, n));
+                ui.label(format!("[D] {}{}", label, n));
             }
             NBTValue::String(n) => {
                 ui.label(n);
@@ -233,7 +238,7 @@ impl NBTEditor {
                         ui.make_persistent_id(counter),
                         true,
                     )
-                    .show_header(ui, |ui| ui.label(format!("root [{}]", key)))
+                    .show_header(ui, |ui| ui.label(format!("{} [root]", key)))
                     .body(|ui| {
                         ui.push_id(counter, |ui| {
                             NBTEditor::push_nbt_map(&value, ui, counter);
@@ -247,16 +252,17 @@ impl NBTEditor {
     fn update_central_panel(&mut self, ctx: &egui::Context) {
         // Tabbed central panel for editing and viewing nbt files
         egui::CentralPanel::default().show(ctx, |ui| {
-            for title in self.tabs.buffers.keys() {
-                let tab_location = self.state.find_tab(title);
-                if ui.selectable_label(tab_location.is_some(), title).clicked() {
-                    if let Some(tab_location) = tab_location {
-                        self.state.set_active_tab(tab_location);
-                    } else {
-                        self.state.push_to_focused_leaf(title.clone());
-                    }
-                }
-            }
+            ui.label("LABEL");
+            // for title in self.tabs.buffers.keys() {
+            //     let tab_location = self.state.find_tab(title);
+            //     if ui.selectable_label(tab_location.is_some(), title).clicked() {
+            //         if let Some(tab_location) = tab_location {
+            //             self.state.set_active_tab(tab_location);
+            //         } else {
+            //             self.state.push_to_focused_leaf(title.clone());
+            //         }
+            //     }
+            // }
         });
     }
 
@@ -267,7 +273,7 @@ impl NBTEditor {
                     if ui.button("New").clicked() {
                         info!("New");
                     }
-                    
+
                     if ui.button("Open").clicked() {
                         if let Some(path) = rfd::FileDialog::new().pick_file() {
                             let title = path.file_name().unwrap().to_str().unwrap();
@@ -290,10 +296,16 @@ impl eframe::App for NBTEditor {
         self.update_menu_bar(ctx);
 
         self.update_side_panel(ctx);
-        self.update_central_panel(ctx);
 
-        DockArea::new(&mut self.state)
-            .draggable_tabs(false)
-            .show(ctx, &mut self.tabs);
+        if self.tabs.buffers.is_empty() {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.label("Central panel");
+            });
+        } else {
+            self.update_central_panel(ctx);
+            DockArea::new(&mut self.state)
+                .draggable_tabs(false)
+                .show(ctx, &mut self.tabs);
+        }
     }
 }
