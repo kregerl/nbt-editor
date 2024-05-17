@@ -24,8 +24,8 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "NBT Editor",
         options,
-        Box::new(|_cc| Box::new(NBTEditor::default())),
-        // Box::new(|_cc| Box::new(NBTEditor::new("playerdata.dat").unwrap())),
+        // Box::new(|_cc| Box::new(NBTEditor::default())),
+        Box::new(|_cc| Box::new(NBTEditor::new("playerdata.dat").unwrap())),
     )
 }
 
@@ -53,8 +53,8 @@ impl TabViewer for Tabs {
         ui.heading("NBT Editor");
         egui::ScrollArea::vertical().show(ui, |ui| {
             let counter = 0;
-            let map = self.buffers.get(tab).unwrap();
-            NBTEditor::push_nbt_map(map, ui, counter);
+            let mut map = self.buffers.get_mut(tab).unwrap();
+            NBTEditor::push_nbt_map(&mut map, ui, counter);
         });
     }
 }
@@ -119,8 +119,8 @@ impl NBTEditor {
         Ok(nbt_map)
     }
 
-    fn push_nbt_map(map: &NBTMap, ui: &mut Ui, counter: usize) {
-        for (key, value) in &map.content {
+    fn push_nbt_map(map: &mut NBTMap, ui: &mut Ui, counter: usize) {
+        for (key, value) in &mut map.content {
             match value {
                 nbt::tag::NBTValue::ByteArray(_) => Self::push_nbt_value(key, value, ui, counter),
                 nbt::tag::NBTValue::List(_) => Self::push_nbt_value(key, value, ui, counter),
@@ -132,7 +132,7 @@ impl NBTEditor {
         }
     }
 
-    fn push_nbt_value(name: &str, tag: &NBTValue, ui: &mut Ui, counter: usize) {
+    fn push_nbt_value(name: &str, tag: &mut NBTValue, ui: &mut Ui, counter: usize) {
         let label = if !name.is_empty() {
             format!("{}: ", name)
         } else {
@@ -158,6 +158,7 @@ impl NBTEditor {
                     .double_clicked()
                 {
                     debug!("Double clicked");
+                    *n += 1.0;
                 }
                 // ui.label(format!("[F] {}{}", label, n));
             }
@@ -165,7 +166,7 @@ impl NBTEditor {
                 ui.label(format!("[D] {}{}", label, n));
             }
             NBTValue::String(n) => {
-                ui.label(n);
+                ui.label(n.clone());
             }
             NBTValue::List(list) => {
                 let len = list.len();
@@ -179,7 +180,7 @@ impl NBTEditor {
                 };
                 Self::push_collapsing(
                     &label,
-                    map.iter().map(|(name, tag)| (name.as_str(), tag)),
+                    map.iter_mut().map(|(name, tag)| (name.as_str(), tag)),
                     counter,
                     ui,
                 );
@@ -210,7 +211,7 @@ impl NBTEditor {
 
     fn push_collapsing<'a, I>(label: &str, elements: I, mut counter: usize, ui: &mut Ui)
     where
-        I: Iterator<Item = (&'a str, &'a NBTValue)>,
+        I: Iterator<Item = (&'a str, &'a mut NBTValue)>,
     {
         counter += 1;
         ui.push_id(counter, |ui| {
@@ -231,7 +232,7 @@ impl NBTEditor {
             ui.heading("NBT Editor");
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let mut counter = 0;
-                for (key, value) in &self.tabs.buffers {
+                for (key, value) in &mut self.tabs.buffers {
                     counter += 1;
                     CollapsingState::load_with_default_open(
                         ctx,
@@ -241,7 +242,7 @@ impl NBTEditor {
                     .show_header(ui, |ui| ui.label(format!("{} [root]", key)))
                     .body(|ui| {
                         ui.push_id(counter, |ui| {
-                            NBTEditor::push_nbt_map(&value, ui, counter);
+                            NBTEditor::push_nbt_map(value, ui, counter);
                         });
                     });
                 }
